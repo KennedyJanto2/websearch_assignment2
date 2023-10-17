@@ -36,7 +36,7 @@ def createCategory(cur, catId, catName):
     # Insert a category in the database
     try:
         cur.execute("INSERT INTO categories (id, name) VALUES (%s, %s)", (catId, catName))
-    except:
+    except Exception:
         print("Error: Issue creating category")
 
 def createDocument(cur, docId, docText, docTitle, docDate, docCat):
@@ -65,8 +65,8 @@ def createDocument(cur, docId, docText, docTitle, docDate, docCat):
         # 4.3 Insert the term and its corresponding count into the database
         term_counts = {term: terms.count(term) for term in set(terms)}
         for term, count in term_counts.items():
-            cur.execute("INSERT INTO index (term, doc_id, count) VALUES (%s, %s, %s)", (term, docId, count))
-    except:
+            cur.execute("INSERT INTO doc_index (term, doc_id, count) VALUES (%s, %s, %s)", (term, docId, count))
+    except Exception:
         print("Error: Issue creating document")
 
 def deleteDocument(cur, docId):
@@ -74,19 +74,19 @@ def deleteDocument(cur, docId):
         # 1 Query the index based on the document to identify terms
         # 1.1 For each term identified, delete its occurrences in the index for that document
         # 1.2 Check if there are no more occurrences of the term in another document. If this happens, delete the term from the database.
-        cur.execute("SELECT term FROM index WHERE doc_id=%s", (docId,))
+        cur.execute("SELECT term FROM doc_index WHERE doc_id=%s", (docId,))
         terms = cur.fetchall()
 
         for term in terms:
-            cur.execute("DELETE FROM index WHERE term=%s AND doc_id=%s", (term, docId))
-            cur.execute("SELECT EXISTS(SELECT 1 FROM index WHERE term=%s)", (term,))
+            cur.execute("DELETE FROM doc_index WHERE term=%s AND doc_id=%s", (term, docId))
+            cur.execute("SELECT EXISTS(SELECT 1 FROM doc_index WHERE term=%s)", (term,))
             if not cur.fetchone()[0]:
                 cur.execute("DELETE FROM terms WHERE term=%s", (term,))
 
         # 2 Delete the document from the database
         cur.execute("DELETE FROM documents WHERE id=%s", (docId,))
-    except:
-        print("Error:Issue deleting document")
+    except Exception:
+        print("Error: Issue deleting document")
 
 def updateDocument(cur, docId, docText, docTitle, docDate, docCat):
     try:
@@ -95,8 +95,25 @@ def updateDocument(cur, docId, docText, docTitle, docDate, docCat):
 
         # 2 Create the document with the same id
         createDocument(cur, docId, docText, docTitle, docDate, docCat)
-    except:
+    except Exception:
         print("Error: Issue updating document")
+        
+        
+def modifyDocument(cur, doc_id, text, title, date, category):
+    try:
+        # First, delete old terms from the index
+        cur.execute("DELETE FROM doc_index WHERE doc_id=?", (doc_id,))
+        # Update the document details
+        cur.execute("UPDATE documents SET text=?, title=?, date=?, category=? WHERE id=?", 
+                    (text, title, date, category, doc_id))
+        # Now, re-index the updated document
+        terms = text.split()
+        term_freq = {term: terms.count(term) for term in set(terms)}
+        for term, freq in term_freq.items():
+            cur.execute("INSERT INTO doc_index (doc_id, term, count) VALUES (?, ?, ?)", (doc_id, term, freq))
+    except Exception:
+        print("Error: Issue modifying document")
+
 
 def getIndex(cur):
 
@@ -104,16 +121,21 @@ def getIndex(cur):
     # {'baseball':'Exercise:1','summer':'Exercise:1,California:1,Arizona:1','months':'Exercise:1,Discovery:3'}
     # ...
     try:
-        cur.execute("SELECT term, doc_id, count FROM index")
+        cur.execute("""
+            SELECT term, documents.title, count 
+            FROM doc_index
+            JOIN documents ON doc_index.doc_id = documents.id
+            ORDER BY term, documents.title
+        """)
         rows = cur.fetchall()
         index = {}
         for row in rows:
-            term, doc_id, count = row
+            term, title, count = row
+            key = f"{title}:{count}"
             if term in index:
-                index[term] += f",{doc_id}:{count}"
+                index[term] += "," + key
             else:
-                index[term] = f"{doc_id}:{count}"
+                index[term] = key
         return index
-    except:
-        print("Error: Issue getting index")
-        return {}
+    except Exception:
+        print("Error: Issue getting doc_index")
